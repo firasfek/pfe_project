@@ -83,34 +83,33 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
-      # Installe Minikube et crée un cluster
-      - name: Setup Minikube
-        uses: medyagh/setup-minikube@v1
-        with:
-          minikube-version: 'latest'
-      
-      # Démarre Minikube
-      - name: Start Minikube
-        run: |
-          minikube start --driver=docker
-          minikube status
-      
-      # Configure kubectl pour utiliser Minikube
-      - name: Configure kubectl
+
+
+      - name: Create kubeconfig
         run: |
           mkdir -p $HOME/.kube
-          minikube kubectl -- config view --raw > $HOME/.kube/config
-      
-      # Crée le namespace
-      - name: Create namespace
-        run: kubectl create namespace ${{ env.K8S_NAMESPACE }} || true
-      
-      # Déploie l'application
+          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+    
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f k8s/ -n ${{ env.K8S_NAMESPACE }}
+          kubectl set image deployment/rest-api-deployment \
+            rest-api=${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }} \
+            -n ${{ env.K8S_NAMESPACE }}
           kubectl rollout status deployment/rest-api-deployment -n ${{ env.K8S_NAMESPACE }}
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}
+          kubectl get services -n ${{ env.K8S_NAMESPACE }}
 
   # Job 4: Notify on completion
   notify:
