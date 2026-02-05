@@ -77,39 +77,42 @@ jobs:
 
   # Job 3: Deploy to Kubernetes
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      needs: build
+      runs-on: ubuntu-latest
+      if: github.ref == 'refs/heads/master'
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
 
+        - name: Create kubeconfig
+          run: |
+            mkdir -p $HOME/.kube
+            echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+            chmod 600 $HOME/.kube/config
 
-      - name: Create kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+        - name: Test Kubernetes connection
+          run: |
+            kubectl cluster-info
+            kubectl get nodes
 
-    
+        - name: Deploy to Kubernetes
+          run: |
+            # Construire le tag de l'image
+            IMAGE_TAG="${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ env.DOCKER_IMAGE }}:master-${{ github.sha }}"
+            
+            # Mettre à jour l'image du déploiement
+            kubectl set image deployment/rest-api-deployment \
+              rest-api=$IMAGE_TAG \
+              -n ${{ env.K8S_NAMESPACE }}
+            
+            # Attendre que le rollout soit terminé
+            kubectl rollout status deployment/rest-api-deployment -n ${{ env.K8S_NAMESPACE }} --timeout=5m
 
-      - name: Configure kubectl
-        uses: azure/k8s-set-context@v3
-        with:
-          method: kubeconfig
-          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+        - name: Verify deployment
+          run: |
+            kubectl get pods -n ${{ env.K8S_NAMESPACE }}
+            kubectl get services -n ${{ env.K8S_NAMESPACE }}
 
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl set image deployment/rest-api-deployment \
-            rest-api=${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }} \
-            -n ${{ env.K8S_NAMESPACE }}
-          kubectl rollout status deployment/rest-api-deployment -n ${{ env.K8S_NAMESPACE }}
-
-      - name: Verify deployment
-        run: |
-          kubectl get pods -n ${{ env.K8S_NAMESPACE }}
-          kubectl get services -n ${{ env.K8S_NAMESPACE }}
 
   # Job 4: Notify on completion
   notify:
